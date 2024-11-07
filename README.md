@@ -87,10 +87,18 @@ performance-related tips.
 
 * How long is it going to take?
 
-  Because of probablistic nature of brute force key generation, and
-  varience of hardware it's going to run on, it's hard to make promisses
-  about how long it's going to take, especially when the most of users
-  want just a few keys.\
+  Because of the probablistic nature of brute force key generation, and
+  varience of hardware it's going to run on, it's hard to make promises
+  about how long it's going to take, especially when most users want
+  just a few keys.
+
+  The probabilty can be calculated with this equation:\
+  $T={32^N \over H}$\
+  where:\
+  *T* is the average time to a match.\
+  *N* is the length of the filter.\
+  *H* is the number of calculations per second.
+
   See [this issue][#27] for very valuable discussion about this.\
   If your machine is powerful enough, 6 character prefix shouldn't take
   more than few tens of minutes, if using batch mode (read
