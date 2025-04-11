@@ -12,21 +12,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: List workspace contents
+        run: ls -al ${{ github.workspace }}
+
       - name: Install dependencies
-        working-directory: Onion_Gen
+        working-directory: ${{ github.workspace }}
         run: |
           sudo apt update
           sudo apt install gcc libc6-dev libsodium-dev make autoconf -y
 
       - name: Build project
-        working-directory: Onion_Gen
+        working-directory: ${{ github.workspace }}
         run: |
           ./autogen.sh
           ./configure
           make
 
       - name: Generate domain name
-        working-directory: Onion_Gen
+        working-directory: ${{ github.workspace }}
         run: |
-          # 使用 secret 变量替换 -n 的值和最后一个参数
           ./mkp224o -n ${{ secrets.GEN_NUMBER }} -d /var/lib/tor/ ${{ secrets.DOMAIN_NAME }}
