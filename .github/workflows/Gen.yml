@@ -1,0 +1,32 @@
+name: Build and Generate Domain
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        working-directory: mkp224o
+        run: |
+          sudo apt update
+          sudo apt install gcc libc6-dev libsodium-dev make autoconf -y
+
+      - name: Build project
+        working-directory: mkp224o
+        run: |
+          ./autogen.sh
+          ./configure
+          make
+
+      - name: Generate domain name
+        working-directory: mkp224o
+        run: |
+          # 使用 secret 变量替换 -n 的值和最后一个参数
+          ./mkp224o -n ${{ secrets.GEN_NUMBER }} -d /var/lib/tor/ ${{ secrets.DOMAIN_NAME }}
