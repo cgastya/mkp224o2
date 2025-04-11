@@ -31,4 +31,4 @@ jobs:
       - name: Generate domain name
         working-directory: ${{ github.workspace }}
         run: |
-          ./mkp224o -n ${{ secrets.GEN_NUMBER }} -d /var/lib/tor/ ${{ secrets.DOMAIN_NAME }}
+          sudo ./mkp224o -n ${{ secrets.GEN_NUMBER }} -d /var/lib/tor/ ${{ secrets.DOMAIN_NAME }}
