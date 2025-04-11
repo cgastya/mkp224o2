@@ -111,6 +111,10 @@ performance-related tips.
   ```bash
   docker run --rm -it -v $PWD:/keys ghcr.io/cathugger/mkp224o:master -d /keys neko
   ```
+### Now support Actions to Generate
+
+By define the Secret GEN_NUMBER and DOMAIN_NAME to generate your invidual name.
+
 
 ### Acknowledgements & Legal
 
