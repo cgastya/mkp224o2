@@ -1,85 +1,138 @@
-name: Docker
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
+name: Generate Vanity Onion 
 
 on:
-  push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
-
-env:
-  # Use docker.io for Docker Hub if empty
-  REGISTRY: ghcr.io
-  # github.repository as <account>/<repo>
-  IMAGE_NAME: ${{ github.repository }}
-
+  workflow_dispatch: # Allows manual trigger
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
+
+    # Grant permissions for the action to commit files back to the repo
     permissions:
-      contents: read
-      packages: write
-      # This is used to complete the identity challenge
-      # with sigstore/fulcio when running outside of PRs.
-      id-token: write
+      contents: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-
-      # Install the cosign tool except on PR
-      # https://github.com/sigstore/cosign-installer
-      - name: Install cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v3
-
-      - name: Setup Docker buildx
-        uses: docker/setup-buildx-action@v2
-
-      # Login against a Docker registry except on PR
-      # https://github.com/docker/login-action
-      - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v2
+        # Use fetch-depth: 0 to get all history, which helps with pull/push
+        uses: actions/checkout@v4
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 
 
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential git autoconf automake libtool libsodium-dev
+
+      - name: Cache mkp224o binary
+        id: cache-mkp
+        uses: actions/cache@v4
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          path: ./mkp224o
+          key: ${{ runner.os }}-mkp224o-${{ hashFiles('./autogen.sh', './configure', 'Makefile.am', 'src/**') }}
 
-      # Build and push Docker image with Buildx (don't push on PR)
-      # https://github.com/docker/build-push-action
-      - name: Build and push Docker image
-        id: build-and-push
-        uses: docker/build-push-action@v4
+      - name: Build mkp224o (if not cached)
+        if: steps.cache-mkp.outputs.cache-hit != 'true'
+        run: |
+          ./autogen.sh
+          ./configure
+          make
+          
+      - name: Check for names2.txt
+        run: |
+          if [ ! -f ".github/workflows/names2.txt" ]; then
+            echo ".github/workflows/names2.txt not found! Please upload it."
+            exit 1
+          fi
+          echo ".github/workflows/names2.txt found. Proceeding..."
+      - name: Run mkp224o in background and save periodically
+        run: |
+          # --- SETTINGS ---
+          # Read from your names2.txt file
+          NAME_FILE=".github/workflows/names2.txt"
+          # We will create a fixed version to solve line-ending issues
+          FIXED_NAME_FILE=".github/workflows/names_fixed.txt"
+          # Save to your complete directory
+          OUTPUT_DIR="mykeyscomplete"
+          # ---
+          
+          mkdir -p $OUTPUT_DIR
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # Fix the line endings from your names.txt and save to a new file.
+          echo "Fixing line endings in $NAME_FILE..."
+          cat $NAME_FILE | tr -d '\r' > $FIXED_NAME_FILE
+          
+          WORD_COUNT=$(wc -l < $FIXED_NAME_FILE)
+          if [ $WORD_COUNT -eq 0 ]; then
+            echo "Error: No names found in $FIXED_NAME_FILE after fixing. Check your file."
+            exit 1
+          fi
+          
+          echo "Starting generator in background with $WORD_COUNT filters from $FIXED_NAME_FILE..."
+          
+          # We use -f to read the file, solving "Argument list too long" errors.
+          ./mkp224o -d $OUTPUT_DIR/ -f $FIXED_NAME_FILE &
+          
+          MKP_PID=$!
+          
+          # Set a time limit: 5 hours 45 minutes (20700 seconds)
+          endtime=$(( $(date +%s) + 20700 ))
+          
+          echo "Generator started (PID: $MKP_PID). Will save progress every 15 minutes."
+          while true; do
+            sleep 900
+            
+            now=$(date +%s)
+            if [ $now -ge $endtime ]; then
+              echo "Time limit reached. Breaking loop to run final save."
+              break
+            fi
+            
+            echo "---"
+            echo "15-minute cycle complete. Committing any new keys..."
+            
+            git add -f $OUTPUT_DIR/
+            
+            if ! git diff --staged --quiet; then
+              echo "New keys found. Committing to repository..."
+              git commit -m "CI: Add new onion keys (periodic save)"
+              
+              echo "Pulling remote changes before pushing..."
+              git pull --rebase
+              git push || (sleep 5 && git push) # Retry push
+            else
+              echo "No new keys found in this cycle."
+            fi
+            
+            if ! kill -0 $MKP_PID 2>/dev/null; then
+              echo "Generator process (PID: $MKP_PID) is no longer running. Exiting loop."
+              break
+            fi
+            echo "Generator is still running. Continuing..."
+          done
+          
+          echo "---"
+          echo "Loop finished. Stopping generator..."
+          kill $MKP_PID 2>/dev/null
+          sleep 10
+          
+          echo "Running one final save..."
+          git add -f $OUTPUT_DIR/
+          
+          # --- THIS IS THE CORRECTED SYNTAX ---
+          if ! git diff --staged --quiet; then
+            echo "Committing final keys..."
+            git commit -m "CI: Add final keys before shutdown"
+            
+            echo "Pulling remote changes before pushing..."
+            git pull --rebase
+            git push || (sleep 5 && git push) # Retry push
+          else
+            echo "No new keys in final save."
+          fi
+          # --- END OF FIX ---
+          echo "All done."
+      - name: Upload all onion keys
+        uses: actions/upload-artifact@v4
         with:
-          file: ./contrib/docker/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Sign the resulting Docker image digest except on PRs.
-      # This will only write to the public Rekor transparency log when the Docker
-      # repository is public to avoid leaking data.  If you would like to publish
-      # transparency data even for private images, pass --force to cosign below.
-      # https://github.com/sigstore/cosign
-      - name: Sign the published Docker image
-        if: ${{ github.event_name != 'pull_request' }}
-        # This step uses the identity token to provision an ephemeral certificate
-        # against the sigstore community Fulcio instance.
-        run: echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build-and-push.outputs.digest }}
+          name: onion-keys-complete
+          path: mykeyscomplete/
